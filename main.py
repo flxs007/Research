@@ -1,75 +1,60 @@
-import numpy as np
-import tensorflow
-import mediapipe
 import cv2
-import cvzone
-from cvzone.PoseModule import PoseDetector
+import mediapipe as mp
+import pandas as pd
 
-cap = cv2.VideoCapture(0)
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+mp_drawing = mp.solutions.drawing_utils
 
-ctime = 0
-ptime = 0
-direction = 0
-push_ups = 0
+video_source = 0  
+cap = cv2.VideoCapture(video_source)
 
-# --------------------------- rgb(37, 150, 190)
-b_color = (0, 0, 0)
-blue_color = (190, 150, 37)
+columns = ['Rep', 'Elbow_Left', 'Elbow_Right', 'Wrist_Left', 'Wrist_Right']
+data = []
+rep_count = 0
 
+print("Press 's' to start recording reps and 'q' to quit.")
 
-detector = PoseDetector()
-while True:
-    _, img = cap.read()
-    img = detector.findPose(img)
-    lmlist, bbox = detector.findPosition(img, draw=False)
-    if lmlist:
-
-        a1 = detector.findAngle(img, 12, 14, 16)
-        a2 = detector.findAngle(img, 15, 13, 11)
-
-        per_val1 = int(np.interp(a1, (90, 170), (100, 0)))
-        per_val2 = int(np.interp(a2, (90, 170), (100, 0)))
-
-        bar_val1 = int(np.interp(per_val1, (0, 100), (40+350, 40)))
-        bar_val2 = int(np.interp(per_val2, (0, 100), (40+350, 40)))
-
-        # 1st bar
-        cv2.rectangle(img, (570, bar_val1), (570 + 35, 40 + 350), (0, 0, 255), cv2.FILLED)
-        cv2.rectangle(img, (570, 40), (570 + 35, 40+350), (), 2)
-
-        # 2st bar
-        cv2.rectangle(img, (35, bar_val2), (35 + 35, 40 + 350), (0, 0, 255), cv2.FILLED)
-        cv2.rectangle(img, (35, 40), (35 + 35, 40 + 350), (), 2)
-
-        # bar %
-        cvzone.putTextRect(img, f"{per_val1} %", (570, 25), 1.3, 2, colorT=blue_color, colorR=(255, 255, 255), border=1, colorB=b_color)  # (B,G,R)
-        cvzone.putTextRect(img, f"{per_val2} %", (25, 25), 1.3, 2, colorT=blue_color, colorR=(255, 255, 255), border=1, colorB=b_color)  # (B,G,R)
-
-        if per_val1 == 100 and per_val2 == 100:
-            if direction == 0:
-                push_ups += 0.5
-                direction = 1
-                color = (0, 255, 0)
-
-        elif per_val1 == 0 and per_val2 == 0:
-            if direction == 1:
-                push_ups += 0.5
-                direction = 0
-                color = (0, 255, 0)
-        else:
-            color = (0, 0, 255)
-
-        cvzone.putTextRect(img, f"Push_ups : {int(push_ups)}", (200, 35), 2, 2, colorT=(0, 0, 255), colorR=(0, 255, 0), colorB=(), border=1)
-        cvzone.putTextRect(img, "Left Hand", (15, 350+100), 1.5, 2, colorT=(255, 255, 255), colorR=blue_color, colorB=b_color, border=1)
-        cvzone.putTextRect(img, "Right Hand", (485, 350+100), 1.5, 2, colorT=(255, 255, 255), colorR=blue_color, colorB=b_color, border=1)
-
-        print(push_ups)
-
-    ctime = time.time()
-    fps = 1/(ctime-ptime)
-    ptime = ctime
-    # cvzone.putTextRect(img, f"FPS :{int(fps)}", (288, 440), 1.5, 1, colorT=(255, 255, 255), colorR=(1, 155, 0), border=2,colorB=(0, 0, 0))
-
-    cv2.imshow("Posh-ups Counter", img)
-    if cv2.waitKey(1) == ord("q"):
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame. Exiting.")
         break
+
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(rgb_frame)
+
+    mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+    if results.pose_landmarks:
+        landmarks = results.pose_landmarks.landmark
+
+        left_elbow = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW]
+        right_elbow = landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW]
+        left_wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST]
+        right_wrist = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST]
+
+        elbow_left_y = left_elbow.y
+        elbow_right_y = right_elbow.y
+        wrist_left_y = left_wrist.y
+        wrist_right_y = right_wrist.y
+
+        cv2.putText(frame, f"Elbow L: {elbow_left_y:.2f}, Elbow R: {elbow_right_y:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, f"Wrist L: {wrist_left_y:.2f}, Wrist R: {wrist_right_y:.2f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        if cv2.waitKey(1) & 0xFF == ord('s'):
+            rep_count += 1
+            data.append([rep_count, elbow_left_y, elbow_right_y, wrist_left_y, wrist_right_y])
+            print(f"Recorded Rep {rep_count}")
+
+    cv2.imshow('Push-Up Tracker', frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
+df = pd.DataFrame(data, columns=columns)
+df.to_csv('pushup_data.csv', index=False)
+print("Data saved to 'pushup_data.csv'.")
